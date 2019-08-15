@@ -3,6 +3,7 @@
   <div class="input-tag-container" :class="{
       'input-tag-container--active': isInputActive,
     }">
+    <i class="iconfont iconwuliao-shanchu color-alert" v-if="clearBtnVisible" @click="innerTags = []"></i>
     <div
       @click.stop="focusNewTag"
       :class="{
@@ -17,7 +18,16 @@
         :key="index"
         :class="{'input-tag-active': activeIndex === index || isSelectAll, 'input-tag-error': validateTag(tag)}"
         class="input-tag">
-        <span>{{ tag }}</span>
+        <span @dblclick.stop="changeEdit(index)" v-if="index !== editIndex">{{ tag }}</span>
+        <input
+          type="text"
+          class="edit-tag"
+          ref="input"
+          v-if="index === editIndex"
+          :value="tag"
+          @blur="modifyTag"
+          @keydown.stop
+          @keyup.enter.stop="modifyTag">
         <a v-if="!readOnly" @click.prevent.stop="remove(index)" class="remove">
           <slot name="remove-icon" />
         </a>
@@ -27,7 +37,7 @@
         ref="inputtag"
         :placeholder="computedPlaceholder"
         type="text"
-        v-model="newTag"
+        v-model.trim="newTag"
         @paste="pasteFn"
         @keydown.delete.stop="removeLastTag"
         @keydown.stop="addNew"
@@ -80,7 +90,7 @@ export default {
     placeholder: {
       type: String,
       default () {
-        return '最多可查询500条，以逗号、空格或回车键隔开'
+        return this.$lang('最多可查询500条，以逗号、空格或回车键隔开')
       }
     },
     readOnly: {
@@ -120,6 +130,10 @@ export default {
     maxHeight: {
       type: String,
       default: '180px'
+    },
+    clearBtnVisible: {
+      type: Boolean,
+      default: false
     }
   },
   data() {
@@ -128,6 +142,7 @@ export default {
       innerTags: [...this.value],
       isInputActive: false,
       activeIndex: -1,
+      editIndex: -1,
       isFocus: false,
       isSelectAll: false
     }
@@ -148,7 +163,7 @@ export default {
         return '96px'
       }
       if (!this.isInputActive) {
-        return '24px'
+        return '26px'
       }
       return 'auto'
     }
@@ -159,6 +174,20 @@ export default {
     }
   },
   methods: {
+    changeEdit(index) {
+      this.editIndex = index
+      setTimeout(() => {
+        const editTagDom = document.querySelector('.edit-tag')
+        editTagDom.focus()
+        editTagDom.select()
+      }, 300)
+    },
+    modifyTag() {
+      this.innerTags[this.editIndex] = document.querySelector('.edit-tag').value
+      this.tagChange()
+      this.editIndex = -1
+      this.focusNewTag()
+    },
     changeActive(index) {
       this.activeIndex = index
       this.isSelectAll = false
@@ -172,7 +201,10 @@ export default {
         if (!value) {
           return
         }
-        this.innerTags = removeRepeat([...this.innerTags, ...value.split(' ').filter(item => item)])
+        let tags = value.split(' ')
+        tags = tags.join(',').split(',')
+        tags = tags.join('，').split('，')
+        this.innerTags = removeRepeat([...this.innerTags, ...tags.filter(item => item)])
         this.tagChange()
         e.target.value = ''
         this.newTag = ''
@@ -224,7 +256,7 @@ export default {
 
       const tag = this.beforeAdding
         ? await this.beforeAdding(this.newTag)
-        : this.newTag
+        : this.newTag.trim()
 
       const isValid = await this.validateIfNeeded(tag)
 
@@ -242,7 +274,7 @@ export default {
       }
     },
     validateTag(tag) {
-      return !validators.codeName15.test(tag)
+      return !validators.codeName.test(tag)
     },
     validateIfNeeded(tagValue) {
       if (this.validate === '' || this.validate === undefined) {
@@ -271,6 +303,9 @@ export default {
     changeTag(e) {
       if (this.isFocus) {
         switch (e.keyCode) {
+          case 13: // enter
+            this.changeEdit(this.activeIndex)
+            break
           case 8: // delete
           case 46: // delete
             if (this.isSelectAll) {
@@ -335,8 +370,10 @@ export default {
 </script>
 
 <style lang="scss">
+@import "~@scss/variable.scss";
+
 ::-webkit-input-placeholder { /* WebKit browsers */
-  color: #999999;
+  color: $c-fc-3;
 }
 .vue-input-tag-wrapper {
   background-color: #fff;
@@ -356,7 +393,7 @@ export default {
     border-radius: 2px;
     display: inline-block;
     font-size: 13px;
-    color: #999999;
+    color: $c-fc-3;
     margin-bottom: 3px;
     margin-right: 6px;
     padding: 4px 8px;
@@ -404,6 +441,23 @@ export default {
     height: 16px;
     vertical-align: top;
   }
+  .edit-tag {
+    position: relative;
+    top: -2px;
+    background: transparent;
+    border: 0;
+    color: #777;
+    font-size: 13px;
+    font-weight: 400;
+    margin-bottom: 3px;
+    outline: none;
+    padding: 2px;
+    padding-left: 0;
+    flex-grow: 1;
+    width: 100px;
+    height: 14px;
+    vertical-align: top;
+  }
   .input-tag-active {
     background: rgba(221,221,221,0.5);;
   }
@@ -412,7 +466,15 @@ export default {
   cursor: default;
 }
 .input-tag-container {
+  position: relative;
   height: 32px;
+  .iconwuliao-shanchu {
+    position: absolute;
+    cursor: pointer;
+    top: -28px;
+    right: 7px;
+    color: #F56C6C;
+  }
 }
 .input-tag-container--active {
   height: 32px;
