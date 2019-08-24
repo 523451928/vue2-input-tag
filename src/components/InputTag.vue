@@ -1,56 +1,37 @@
-
 <template>
-  <div class="input-tag-container" :class="{
-      'input-tag-container--active': isInputActive,
-    }">
-    <i class="iconfont iconwuliao-shanchu color-alert" v-if="clearBtnVisible" @click="innerTags = []"></i>
-    <div
-      @click.stop="focusNewTag"
-      :class="{
+  <div class="input-tag-container" :class="{'input-tag-container--active': isInputActive}">
+    <!-- <i class="iconfont iconwuliao-shanchu color-alert" v-if="clearBtnVisible" @click="clearFn"></i> -->
+    <div @click.stop="focusNewTag" :class="{
         'read-only': readOnly,
         'vue-input-tag-wrapper--active': isInputActive,
-      }"
-      :style="{height: inputHeight, maxHeight}"
-      class="vue-input-tag-wrapper"
-    >
-      <span @click.stop="changeActive(index)"
-        v-for="(tag, index) in innerTags"
-        :key="index"
-        :class="{'input-tag-active': activeIndex === index || isSelectAll, 'input-tag-error': validateTag(tag)}"
+      }" :style="{height: inputHeight, maxHeight}" class="vue-input-tag-wrapper" @scroll="scrollFn">
+      <span @click="changeActive(index)" v-for="(tag, index) in innerTags" :key="index" :data-index="index"
+        :class="{'input-tag-active': selectIndexArr.includes(index) || activeIndex === index, 'input-tag-error': validateTag(tag)}"
         class="input-tag">
-        <span @dblclick.stop="changeEdit(index)" v-if="index !== editIndex">{{ tag }}</span>
-        <input
-          type="text"
-          class="edit-tag"
-          ref="input"
-          v-if="index === editIndex"
-          :value="tag"
-          @blur="modifyTag"
-          @keydown.stop
-          @keyup.enter.stop="modifyTag">
+        <span @dblclick.stop="changeEdit(index)" :data-index="index" v-if="index !== editIndex">{{ tag }}</span>
+        <input type="text" class="edit-tag" ref="input" v-if="index === editIndex" :value="tag" @blur="modifyTag" @keydown.stop
+          @keyup.esc.stop="notModify(tag)" @keyup.enter.stop="modifyTag">
         <a v-if="!readOnly" @click.prevent.stop="remove(index)" class="remove">
           <slot name="remove-icon" />
         </a>
       </span>
-      <input
-        v-if="!readOnly && !isLimit"
-        ref="inputtag"
-        :placeholder="computedPlaceholder"
-        type="text"
-        v-model.trim="newTag"
-        @paste="pasteFn"
-        @keydown.delete.stop="removeLastTag"
-        @keydown.stop="addNew"
-        @blur="handleInputBlur"
-        @focus="handleInputFocus"
-        class="new-tag"
-      />
+      <span v-show="innerTags.length && isInputActive" class="del-btn" @click="clearFn"
+        :style="{top: scrollTop + 'px', bottom: -scrollTop + 'px'}">
+        <span class="icon-container">
+          <i v-show="clearBtnVisible" class="iconfont iconwuliao-shanchu"></i>
+          <!-- <br />
+          <i class="iconfont iconjiesuanpingtai-fuzhi" @click="copyText"></i> -->
+        </span>
+      </span>
+      <input v-if="!readOnly && !isLimit" ref="inputtag" :placeholder="computedPlaceholder" type="text" v-model.trim="newTag"
+        @paste="pasteFn" @keydown.delete.stop="removeLastTag" @keydown.stop="addNew" @blur="handleInputBlur" @focus="handleInputFocus"
+        class="new-tag" />
     </div>
   </div>
 </template>
 
 <script>
-const removeRepeat = (arr) => {
+const removeRepeat = arr => {
   if (typeof arr[0] === 'object') {
     for (let i = 0; i < arr.length; i++) {
       arr[i] = JSON.stringify(arr[i])
@@ -63,6 +44,22 @@ const removeRepeat = (arr) => {
     arr = [...new Set(arr)]
   }
   return arr
+}
+const copyText = txt => {
+  if (typeof txt !== 'string' || !txt.length) {
+    return
+  }
+  let txtEl = document.createElement('input')
+  txtEl.setAttribute('type', 'text')
+  txtEl.setAttribute('value', txt)
+  txtEl.style.position = 'fixed'
+  txtEl.style.left = '-999999px'
+  txtEl.style.top = '-9999px'
+  document.body.appendChild(txtEl)
+  txtEl.select()
+  document.execCommand('copy')
+  document.body.removeChild(txtEl)
+  txtEl = null
 }
 
 const validators = {
@@ -77,7 +74,8 @@ const validators = {
   isodate: new RegExp(
     /^\d{4}[\/\-](0?[1-9]|1[012])[\/\-](0?[1-9]|[12][0-9]|3[01])$/
   ),
-  codeName15: /^([a-zA-Z0-9_]{1,15})$/
+  codeName: /^([a-zA-Z0-9_]{1,20})$/,
+  isNumber: /^([0-9_]{1,20})$/
 }
 
 export default {
@@ -89,7 +87,7 @@ export default {
     },
     placeholder: {
       type: String,
-      default () {
+      default() {
         return this.$lang('最多可查询500条，以逗号、空格或回车键隔开')
       }
     },
@@ -99,7 +97,7 @@ export default {
     },
     validate: {
       type: [String, Function, Object],
-      default: ''
+      default: 'codeName'
     },
     addTagOnKeys: {
       type: Array,
@@ -133,18 +131,20 @@ export default {
     },
     clearBtnVisible: {
       type: Boolean,
-      default: false
+      default: true
     }
   },
   data() {
     return {
       newTag: '',
       innerTags: [...this.value],
+      selectIndexArr: [],
       isInputActive: false,
       activeIndex: -1,
       editIndex: -1,
       isFocus: false,
-      isSelectAll: false
+      isCtrl: false,
+      scrollTop: 0
     }
   },
   computed: {
@@ -159,11 +159,15 @@ export default {
     },
     inputHeight() {
       const wrapperDom = document.querySelector('.vue-input-tag-wrapper')
-      if (this.isInputActive && wrapperDom.clientHeight < 96 && !this.innerTags.length) {
-        return '96px'
+      if (
+        this.isInputActive &&
+        wrapperDom.clientHeight < 100 &&
+        !this.innerTags.length
+      ) {
+        return '100px'
       }
       if (!this.isInputActive) {
-        return '26px'
+        return '27px'
       }
       return 'auto'
     }
@@ -171,26 +175,71 @@ export default {
   watch: {
     value() {
       this.innerTags = [...this.value]
+    },
+    selectIndexArr(newVal) {
+      if (newVal.length > 1) {
+        this.activeIndex = -1
+      }
+    },
+    activeIndex(newVal) {
+      if (newVal !== -1) {
+        this.selectIndexArr = []
+      }
     }
   },
   methods: {
+    scrollFn(e) {
+      this.scrollTop = e.target.scrollTop
+    },
+    clearFn() {
+      this.innerTags = []
+      this.tagChange()
+    },
     changeEdit(index) {
       this.editIndex = index
       setTimeout(() => {
         const editTagDom = document.querySelector('.edit-tag')
-        editTagDom.focus()
-        editTagDom.select()
+        if (editTagDom) {
+          editTagDom.focus()
+          editTagDom.select()
+        }
       }, 300)
     },
-    modifyTag() {
-      this.innerTags[this.editIndex] = document.querySelector('.edit-tag').value
-      this.tagChange()
+    async modifyTag() {
+      const value = document.querySelector('.edit-tag').value
+      const isValid = await this.validateIfNeeded(value)
+      if (isValid) {
+        this.innerTags[this.editIndex] = value
+        this.tagChange()
+        this.editIndex = -1
+        this.focusNewTag()
+      }
+    },
+    notModify() {
       this.editIndex = -1
-      this.focusNewTag()
+    },
+    selectTag(index) {
+      if (this.selectIndexArr.includes(index)) {
+        const arr = this.selectIndexArr.filter(item => index !== item)
+        this.selectIndexArr = arr
+      } else {
+        this.selectIndexArr.push(index)
+      }
+      if (this.activeIndex !== -1) {
+        this.selectIndexArr.push(this.activeIndex)
+      }
+      this.selectIndexArr = this.selectIndexArr.sort((a, b) => a - b)
+      this.activeIndex = -1
+      this.isFocus = true
+      if (!this.isInputActive) {
+        this.isInputActive = true
+      }
     },
     changeActive(index) {
+      if (this.isCtrl) return
+      this.selectIndexArr = []
       this.activeIndex = index
-      this.isSelectAll = false
+      this.isFocus = true
       if (!this.isInputActive) {
         this.isInputActive = true
       }
@@ -204,13 +253,25 @@ export default {
         let tags = value.split(' ')
         tags = tags.join(',').split(',')
         tags = tags.join('，').split('，')
-        this.innerTags = removeRepeat([...this.innerTags, ...tags.filter(item => item)])
+        this.innerTags = removeRepeat([
+          ...this.innerTags,
+          ...tags.filter(item => item)
+        ])
         this.tagChange()
         e.target.value = ''
         this.newTag = ''
       }, 100)
     },
-    focusNewTag() {
+    focusNewTag(e) {
+      if (e && e.target) {
+        const dataIndex = e.target.getAttribute('data-index')
+        if (this.isCtrl && dataIndex) {
+          this.selectTag(Number(dataIndex))
+        }
+        if (dataIndex) {
+          return
+        }
+      }
       this.isFocus = true
       if (this.readOnly || !this.$el.querySelector('.new-tag')) {
         return
@@ -223,19 +284,35 @@ export default {
     },
     handleInputFocus() {
       this.activeIndex = -1
+      this.selectIndexArr = []
       this.isInputActive = true
     },
     handleInputBlur(e) {
       this.addNew(e)
     },
+    copyText() {
+      if (this.activeIndex !== -1) {
+        return copyText(this.innerTags[this.activeIndex])
+      }
+      const arr = this.innerTags.filter((item, index) =>
+        this.selectIndexArr.includes(index)
+      )
+      copyText(arr.join(' '))
+    },
     async addNew(e) {
+      // ctrl + c 复制
+      if (e.keyCode === 67 && e.ctrlKey) {
+        this.copyText()
+      }
+      // ctrl + a 权限
       if (e.keyCode === 65 && e.ctrlKey) {
-        this.isSelectAll = true
+        this.selectIndexArr = this.innerTags.map((item, index) => index)
         this.$nextTick(() => {
           e && e.preventDefault()
           this.$el.querySelector('.new-tag').blur()
         })
       }
+      // 左键改变选择项
       if (e.keyCode === 37 && !this.newTag) {
         this.activeIndex = this.innerTags.length - 1
         this.$refs.inputtag.blur()
@@ -253,7 +330,7 @@ export default {
       ) {
         return
       }
-
+      // 添加标签
       const tag = this.beforeAdding
         ? await this.beforeAdding(this.newTag)
         : this.newTag.trim()
@@ -274,7 +351,7 @@ export default {
       }
     },
     validateTag(tag) {
-      return !validators.codeName.test(tag)
+      return !validators[this.validate].test(tag)
     },
     validateIfNeeded(tagValue) {
       if (this.validate === '' || this.validate === undefined) {
@@ -301,6 +378,9 @@ export default {
       return true
     },
     changeTag(e) {
+      if (e.keyCode === 67 && e.ctrlKey) {
+        this.copyText()
+      }
       if (this.isFocus) {
         switch (e.keyCode) {
           case 13: // enter
@@ -308,22 +388,46 @@ export default {
             break
           case 8: // delete
           case 46: // delete
-            if (this.isSelectAll) {
-              this.innerTags = []
+            if (this.activeIndex !== -1) {
+              this.innerTags.splice(this.activeIndex, 1)
+            } else {
+              const tags = this.innerTags.filter(
+                (item, index) => !this.selectIndexArr.includes(index)
+              )
+              this.innerTags = tags
             }
-            this.innerTags.splice(this.activeIndex, 1)
-            if (!this.innerTags.length || this.activeIndex === this.innerTags.length) {
+            this.selectIndexArr = []
+            if (
+              !this.innerTags.length ||
+              this.activeIndex === this.innerTags.length
+            ) {
               this.focusNewTag()
             }
             if (this.activeIndex === this.innerTags.length) {
               this.activeIndex = -1
             }
-            this.isSelectAll = false
             break
           case 37: // left
+            if (this.selectIndexArr.length) {
+              const firstIndex = this.selectIndexArr[0]
+              if (firstIndex > 0) {
+                this.activeIndex = firstIndex - 1
+              }
+              return
+            }
             this.activeIndex > 0 && this.activeIndex--
             break
           case 39: // right
+            if (this.selectIndexArr.length) {
+              const lastIndex = this.selectIndexArr[
+                this.selectIndexArr.length - 1
+              ]
+              if (lastIndex === this.innerTags.length) {
+                this.activeIndex = -1
+                return this.focusNewTag()
+              }
+              this.activeIndex = lastIndex
+            }
             if (this.activeIndex < this.innerTags.length - 1) {
               return this.activeIndex++
             }
@@ -361,6 +465,23 @@ export default {
   mounted() {
     document.addEventListener('keydown', this.changeTag)
     document.addEventListener('click', this.blurTag)
+    const isWin =
+      navigator.platform === 'Win32' || navigator.platform === 'Windows'
+    const isMac =
+      navigator.platform === 'Mac68K' ||
+      navigator.platform === 'MacPPC' ||
+      navigator.platform === 'Macintosh' ||
+      navigator.platform === 'MacIntel'
+    document.addEventListener('keydown', e => {
+      if ((e.keyCode === 17 && isWin) || (e.keyCode === 91 && isMac)) {
+        this.isCtrl = true
+      }
+    })
+    document.addEventListener('keyup', e => {
+      if ((e.keyCode === 17 && isWin) || (e.keyCode === 91 && isMac)) {
+        this.isCtrl = false
+      }
+    })
   },
   destroyed() {
     document.removeEventListener('keydown', this.changeTag)
@@ -370,14 +491,13 @@ export default {
 </script>
 
 <style lang="scss">
-@import "~@scss/variable.scss";
-
-::-webkit-input-placeholder { /* WebKit browsers */
-  color: $c-fc-3;
+::-webkit-input-placeholder {
+  /* WebKit browsers */
+  color: #999999;
 }
 .vue-input-tag-wrapper {
   background-color: #fff;
-  border: 1px solid #DDD;
+  border: 1px solid #ddd;
   border-radius: 5px;
   overflow-y: auto;
   padding-left: 4px;
@@ -387,19 +507,19 @@ export default {
   -webkit-appearance: textfield;
   display: flex;
   flex-wrap: wrap;
-  transition: all .5s;
+  transition: all 0.5s;
   max-height: 102px;
   .input-tag {
     border-radius: 2px;
     display: inline-block;
     font-size: 13px;
-    color: $c-fc-3;
+    color: #999999;
     margin-bottom: 3px;
     margin-right: 6px;
     padding: 4px 8px;
-    background:rgba(221,221,221,0.1);
-    border-radius:2px;
-    border:1px solid rgba(221,221,221,0.5);
+    background: rgba(221, 221, 221, 0.1);
+    border-radius: 2px;
+    border: 1px solid rgba(221, 221, 221, 0.5);
     box-sizing: border-box;
     height: 24px;
     line-height: 1;
@@ -419,11 +539,11 @@ export default {
     }
   }
   .input-tag-error {
-    border-color: #FF6A69;
-    background: rgba(255,106,105,0.1);
-    color: #FF6A69;
+    border-color: #ff6a69;
+    background: rgba(255, 106, 105, 0.1);
+    color: #ff6a69;
     .remove {
-      color: #FF6A69;
+      color: #ff6a69;
     }
   }
   .new-tag {
@@ -441,40 +561,15 @@ export default {
     height: 16px;
     vertical-align: top;
   }
-  .edit-tag {
-    position: relative;
-    top: -2px;
-    background: transparent;
-    border: 0;
-    color: #777;
-    font-size: 13px;
-    font-weight: 400;
-    margin-bottom: 3px;
-    outline: none;
-    padding: 2px;
-    padding-left: 0;
-    flex-grow: 1;
-    width: 100px;
-    height: 14px;
-    vertical-align: top;
-  }
   .input-tag-active {
-    background: rgba(221,221,221,0.5);;
+    background: rgba(221, 221, 221, 0.5);
   }
 }
 .vue-input-tag-wrapper.read-only {
   cursor: default;
 }
 .input-tag-container {
-  position: relative;
   height: 32px;
-  .iconwuliao-shanchu {
-    position: absolute;
-    cursor: pointer;
-    top: -28px;
-    right: 7px;
-    color: #F56C6C;
-  }
 }
 .input-tag-container--active {
   height: 32px;
@@ -483,7 +578,7 @@ export default {
 }
 .vue-input-tag-wrapper--active {
   position: absolute;
-  border-color: #69A1FF;
+  border-color: #69a1ff;
   box-sizing: border-box;
   width: 100%;
   left: 0;
